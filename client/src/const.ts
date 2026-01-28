@@ -2,14 +2,14 @@ export { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 
 // Generate login URL at runtime so redirect URI reflects the current origin.
 export const getLoginUrl = () => {
-  // FIX 1: We check for 'VITE_OAUTH_SERVER_URL' because that is what you have in Railway.
+  // FIX: Check for 'VITE_OAUTH_SERVER_URL' (matches your Railway settings)
   // We also keep 'VITE_OAUTH_PORTAL_URL' as a backup.
   const oauthPortalUrl = import.meta.env.VITE_OAUTH_SERVER_URL || import.meta.env.VITE_OAUTH_PORTAL_URL || "";
   
   const appId = import.meta.env.VITE_APP_ID || "";
 
-  // FIX 2: SAFETY CHECK
-  // If the variable is still missing, we stop here instead of crashing the app.
+  // CRITICAL SAFETY CHECK:
+  // If the variable is missing, return a safe string ("#") instead of crashing.
   if (!oauthPortalUrl || !appId) {
     console.error("CRITICAL: Missing VITE_OAUTH_SERVER_URL or VITE_APP_ID. Check Railway Variables.");
     return "#"; 
