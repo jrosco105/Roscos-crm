@@ -50,6 +50,86 @@ const createQuoteSchema = z.object({
   notes: z.string().optional(),
 });
 
+// ============ PAYPAL ROUTER (NEW & SECURE) ============
+
+const paypalRouter = router({
+  createOrder: publicProcedure
+    .input(z.object({ amount: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      try {
+        // 1. Get credentials SECURELY from server environment
+        // The browser NEVER sees 'PAYPAL_CLIENT_SECRET'
+        const clientId = process.env.VITE_PAYPAL_CLIENT_ID;
+        const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+
+        if (!clientId || !clientSecret) {
+          console.error("Missing PayPal variables in Railway");
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Payment configuration missing",
+          });
+        }
+
+        // 2. Get Access Token from PayPal
+        // NOTE: Use "api-m.paypal.com" for Live (Production)
+        const baseUrl = "https://api-m.sandbox.paypal.com"; 
+        const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+
+        const tokenResponse = await fetch(`${baseUrl}/v1/oauth2/token`, {
+          method: "POST",
+          body: "grant_type=client_credentials",
+          headers: {
+            Authorization: `Basic ${auth}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+        });
+
+        if (!tokenResponse.ok) {
+          throw new Error("Failed to authenticate with PayPal");
+        }
+
+        const tokenData = await tokenResponse.json();
+
+        // 3. Create the Order
+        const orderResponse = await fetch(`${baseUrl}/v2/checkout/orders`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${tokenData.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            intent: "CAPTURE",
+            purchase_units: [
+              {
+                amount: {
+                  currency_code: "USD",
+                  // Default to 100.00 if no amount is passed (e.g. deposit)
+                  value: input.amount || "100.00", 
+                },
+              },
+            ],
+          }),
+        });
+
+        if (!orderResponse.ok) {
+          throw new Error("Failed to create PayPal order");
+        }
+
+        const orderData = await orderResponse.json();
+        
+        // Return only the order ID/Links to the client
+        return orderData;
+
+      } catch (error) {
+        console.error("PayPal Error:", error);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to initiate payment",
+        });
+      }
+    }),
+});
+
 // ============ QUOTE CALCULATOR ROUTER ============
 
 const quoteRouter = router({
@@ -67,7 +147,6 @@ const quoteRouter = router({
         }
 
         // Estimate distance (simplified - in production, use Google Maps API)
-        // For now, use a rough estimate based on ZIP code distance
         const estimatedDistance = Math.random() * 500 + 10; // 10-510 miles
 
         // Calculate costs
@@ -147,12 +226,13 @@ const leadRouter = router({
           });
         } catch (emailError) {
           console.error("Failed to send notification email:", emailError);
+        }
+
         // Send SMS notification to customer
         try {
           await sendQuoteSubmissionSMS(input.customerPhone, input.customerName, `QUOTE-${Date.now()}`);
         } catch (smsError) {
           console.error("Failed to send SMS notification:", smsError);
-        }
         }
 
         return { success: true };
@@ -526,6 +606,8 @@ const vehicleRouter = router({
 
 export const appRouter = router({
   system: systemRouter,
+  // Added PayPal Router here
+  paypal: paypalRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     login: publicProcedure
@@ -567,3 +649,7 @@ export const appRouter = router({
 });
 
 export type AppRouter = typeof appRouter;
+
+
+
+     
